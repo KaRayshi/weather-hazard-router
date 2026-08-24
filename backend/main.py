@@ -428,6 +428,6 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 
-_frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+_frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 if os.path.isdir(_frontend_dir):
     app.mount("/", NoCacheStaticFiles(directory=_frontend_dir, html=True), name="frontend")
