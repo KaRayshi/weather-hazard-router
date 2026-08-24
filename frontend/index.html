@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>STORMLINE — Which route is safe right now?</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+    />
+    <link rel="stylesheet" href="styles.css?v=4" />
+  </head>
+  <body class="mode-simple">
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div class="brand-text">
+          <span class="brand-name">STORMLINE</span>
+          <span class="brand-sub" id="brandSub"
+            >is it safe to drive right now?</span
+          >
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="topbar-status" data-advanced>
+          <div class="status-item">
+            <span class="status-label">API link</span>
+            <span class="status-value" id="apiStatus">
+              <span class="dot dot--pending"></span> connecting…
+            </span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Road data</span>
+            <span class="status-value mono" id="networkSource">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Next auto-check</span>
+            <span class="status-value mono" id="nextRefresh">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Clock</span>
+            <span class="status-value mono" id="clock">—</span>
+          </div>
+        </div>
+
+        <label class="mode-toggle">
+          <span class="mode-toggle-label" id="modeToggleLabel">Simple</span>
+          <input type="checkbox" id="modeSwitch" />
+          <span class="mode-toggle-track"
+            ><span class="mode-toggle-thumb"></span
+          ></span>
+        </label>
+      </div>
+    </header>
+
+    <!-- ============================== SIMPLE MODE HERO ============================== -->
+    <section class="hero" data-simple>
+      <div class="hero-card">
+        <h1 class="hero-title">Where are you headed?</h1>
+        <p class="hero-sub">
+          We'll check live weather along the way and tell you the safest route.
+        </p>
+
+        <div class="hero-steps">
+          <div class="hero-step">
+            <span class="hero-step-num">1</span>
+            <div class="hero-step-body">
+              <div class="search-wrap" id="originSearchWrap">
+                <input type="text" id="originSearchInput" class="search-input"
+                       placeholder="Search a starting place…" autocomplete="off" />
+                <div class="search-results" id="originSearchResults" hidden></div>
+              </div>
+              <button id="btnUseLocation" class="btn btn--primary btn--wide">
+                📍 Use my location
+              </button>
+              <span class="field-hint">Or tap a starting point on the map</span>
+            </div>
+          </div>
+          <div class="hero-step">
+            <span class="hero-step-num">2</span>
+            <div class="hero-step-body">
+              <div class="search-wrap" id="destSearchWrap">
+                <input type="text" id="destSearchInput" class="search-input"
+                       placeholder="Search your destination…" autocomplete="off" />
+                <div class="search-results" id="destSearchResults" hidden></div>
+              </div>
+              <div class="hero-pin-status" id="originStatus">
+                Waiting for origin…
+              </div>
+              <div class="hero-pin-status" id="destStatus">
+                Then tap your destination on the map
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <details class="hero-manual">
+          <summary>Pick from a list instead</summary>
+          <label class="field">
+            <span class="field-label">Origin</span>
+            <select id="startNode" class="select"></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Destination</span>
+            <select id="goalNode" class="select"></select>
+          </label>
+        </details>
+
+        <label style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; cursor: pointer; color: var(--text-muted); font-size: 0.85rem;">
+          <input type="checkbox" id="ignoreOneway" />
+          Ignore one-way rules (walking / biking)
+        </label>
+
+        <button id="btnFindRoute" class="btn btn--cta btn--wide" disabled>
+          Find the safest route
+        </button>
+        <button id="btnStartOver" class="btn btn--reset btn--wide" hidden>
+          🔄 Plan a different trip
+        </button>
+        <p class="hero-loading-note" id="roadLoadNote" hidden>
+          Getting real road &amp; weather data for this area…
+        </p>
+      </div>
+
+      <!-- plain-language verdict, filled in after a route is found -->
+      <div class="verdict-card" id="verdictCard" hidden>
+        <div class="verdict-icon" id="verdictIcon">✅</div>
+        <div class="verdict-body">
+          <div class="verdict-headline" id="verdictHeadline">—</div>
+          <div class="verdict-detail" id="verdictDetail">—</div>
+          <div class="verdict-meta">
+            <span><strong id="verdictEta">—</strong> min drive</span>
+            <span><strong id="verdictDist">—</strong> km</span>
+          </div>
+        </div>
+        <details class="verdict-tech" style="flex-basis: 100%;">
+          <summary>▶ See all route options</summary>
+          <div id="verdictTechBody"></div>
+        </details>
+      </div>
+    </section>
+
+    <main class="layout">
+      <!-- LEFT: route + road-data controls (advanced) -->
+      <section
+        class="panel panel--controls"
+        aria-label="Route controls"
+        data-advanced
+      >
+        <h2 class="panel-title">Live road data</h2>
+        <div class="field-hint" style="margin-bottom: 10px">
+          Pan/zoom the map to a small area, then pull real roads from
+          OpenStreetMap for that view.
+        </div>
+        <div class="button-row">
+          <button id="btnLoadRoads" class="btn btn--primary">
+            Load real roads in view
+          </button>
+        </div>
+        <p class="fallback-note" id="osmNote" hidden></p>
+
+        <div class="divider"></div>
+
+        <h2 class="panel-title">Plan route</h2>
+        <div class="field-hint" style="margin-bottom: 10px">
+          Click two points on the map (origin, then destination) — or search
+          by name below.
+        </div>
+
+        <div class="field">
+          <span class="field-label">Search a place</span>
+          <div class="search-wrap" id="advSearchWrap">
+            <input type="text" id="advSearchInput" class="search-input"
+                   placeholder="Type a place name…" autocomplete="off" />
+            <div class="search-results" id="advSearchResults" hidden></div>
+          </div>
+          <span class="field-hint">Results pan the map and set next origin/destination</span>
+          <button id="btnAdvUseLocation" class="btn" style="margin-top: 8px; width: 100%;">
+            📍 Use my location
+          </button>
+        </div>
+
+        <label class="field">
+          <span class="field-label">
+            Risk aversion
+            <span class="mono field-value" id="alphaValue">1.5</span>
+          </span>
+          <input
+            type="range"
+            id="alphaSlider"
+            class="slider"
+            min="0"
+            max="4"
+            step="0.1"
+            value="1.5"
+          />
+          <span class="field-hint"
+            >0 = shortest path only &nbsp;·&nbsp; 4 = avoid risk at any
+            cost</span
+          >
+        </label>
+
+        <div class="button-row">
+          <button id="btnCompare" class="btn btn--primary">
+            Compare routes
+          </button>
+          <button id="btnReroute" class="btn" disabled>Check reroute</button>
+        </div>
+
+        <label style="display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; color: var(--text-muted); font-size: 0.85rem;">
+          <input type="checkbox" id="advIgnoreOneway" />
+          Ignore one-way rules (walking / biking)
+        </label>
+
+        <div class="divider"></div>
+
+        <h2 class="panel-title">Weather feed</h2>
+        <div class="field-hint" style="margin-bottom: 10px">
+          Live conditions from Open-Meteo, sampled at each road node. Refreshes
+          automatically every
+          <span class="mono" id="pollIntervalLabel">300</span>s.
+        </div>
+        <label class="autopoll-row">
+          <input type="checkbox" id="autoPollToggle" checked />
+          <span>Auto-refresh weather</span>
+          <span class="mono autopoll-countdown" id="autoPollCountdown">—</span>
+        </label>
+        <div class="button-row" style="margin-top: 10px">
+          <button id="btnRefresh" class="btn">Poll weather now</button>
+          <button id="btnOutage" class="btn btn--outage">Simulate outage</button>
+          <button id="btnStorm" class="btn" style="background: #e74c3c; color: white;">Simulate storm</button>
+        </div>
+        <p class="fallback-note" id="fallbackNote" hidden>
+          ⚠ Live feed unavailable — routing on historical fallback (NFR-2.1)
+        </p>
+
+        <div class="divider"></div>
+
+        <h2 class="panel-title">Legend</h2>
+        <ul class="legend">
+          <li>
+            <span class="swatch swatch--green"></span> Low risk
+            <span class="mono legend-range">R &lt; 30</span>
+          </li>
+          <li>
+            <span class="swatch swatch--yellow"></span> Moderate
+            <span class="mono legend-range">30–70</span>
+          </li>
+          <li>
+            <span class="swatch swatch--red"></span> Critical
+            <span class="mono legend-range">R ≥ 70</span>
+          </li>
+        </ul>
+      </section>
+
+      <!-- CENTER: real map (always visible, simple or advanced) -->
+      <section class="panel panel--radar" aria-label="Road network risk map">
+        <div class="radar-frame">
+          <div id="map" class="leaflet-map"></div>
+          <div class="radar-caption" data-advanced>
+            SEGMENT RISK — LIVE · click map to set origin/destination
+          </div>
+          <div class="map-legend">
+            <div class="map-legend-row">
+              <span class="swatch swatch--green"></span> Low risk
+              <span class="mono legend-range">R &lt; 30</span>
+            </div>
+            <div class="map-legend-row">
+              <span class="swatch swatch--yellow"></span> Moderate
+              <span class="mono legend-range">30–70</span>
+            </div>
+            <div class="map-legend-row">
+              <span class="swatch swatch--red"></span> Critical
+              <span class="mono legend-range">R &ge; 70</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: stations + event log (advanced) -->
+      <section
+        class="panel panel--side"
+        aria-label="Stations and activity"
+        data-advanced
+      >
+        <h2 class="panel-title">Stations (Open-Meteo)</h2>
+        <div id="stationList" class="station-list">
+          <p class="field-hint">Loading…</p>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2 class="panel-title">Activity log</h2>
+        <div id="eventLog" class="event-log" aria-live="polite"></div>
+      </section>
+
+      <!-- BOTTOM: technical route result cards (advanced) -->
+      <section
+        class="panel panel--results"
+        aria-label="Route results"
+        id="resultsPanel"
+        data-advanced
+        hidden
+      >
+        <div class="result-card" id="fastCard">
+          <div class="result-head">
+            <span class="result-tag result-tag--fast">Fastest</span>
+            <span class="result-band mono" id="fastBand">—</span>
+          </div>
+          <div class="result-path mono" id="fastPath">—</div>
+          <div class="result-stats">
+            <div>
+              <span class="stat-label">Distance</span
+              ><span class="stat-value mono" id="fastDist">—</span>
+            </div>
+            <div>
+              <span class="stat-label">ETA</span
+              ><span class="stat-value mono" id="fastEta">—</span>
+            </div>
+            <div>
+              <span class="stat-label">Risk</span
+              ><span class="stat-value mono" id="fastRisk">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="result-card" id="balancedCard">
+          <div class="result-head">
+            <span class="result-tag" style="background:#f39c12;color:white;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;">Balanced</span>
+            <span class="result-band mono" id="balancedBand">—</span>
+          </div>
+          <div class="result-path mono" id="balancedPath">—</div>
+          <div class="result-stats">
+            <div>
+              <span class="stat-label">Distance</span
+              ><span class="stat-value mono" id="balancedDist">—</span>
+            </div>
+            <div>
+              <span class="stat-label">ETA</span
+              ><span class="stat-value mono" id="balancedEta">—</span>
+            </div>
+            <div>
+              <span class="stat-label">Risk</span
+              ><span class="stat-value mono" id="balancedRisk">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="result-card" id="safeCard">
+          <div class="result-head">
+            <span class="result-tag result-tag--safe">Safest</span>
+            <span class="result-band mono" id="safeBand">—</span>
+          </div>
+          <div class="result-path mono" id="safePath">—</div>
+          <div class="result-stats">
+            <div>
+              <span class="stat-label">Distance</span
+              ><span class="stat-value mono" id="safeDist">—</span>
+            </div>
+            <div>
+              <span class="stat-label">ETA</span
+              ><span class="stat-value mono" id="safeEta">—</span>
+            </div>
+            <div>
+              <span class="stat-label">Risk</span
+              ><span class="stat-value mono" id="safeRisk">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="result-card result-card--tradeoff">
+          <div class="result-head">
+            <span class="result-tag result-tag--tradeoff">Trade-off & Rankings</span>
+          </div>
+          <p id="tradeoffText" class="tradeoff-text" style="margin-bottom:8px;">—</p>
+          <div id="rankingsText" class="tradeoff-text" style="font-size: 0.9em; opacity: 0.9;"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="app.js?v=9"></script>
+  </body>
+</html>
