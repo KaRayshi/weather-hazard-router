@@ -162,6 +162,7 @@ class RoadNetwork:
         goal_id: str,
         alpha: float = 1.0,
         allow_wrong_way: bool = False,
+        edge_penalties: Optional[Dict[str, float]] = None,
     ) -> Optional[RouteResult]:
         """
         Modified A* search. Edge cost:
@@ -212,7 +213,8 @@ class RoadNetwork:
 
         def relax(current: str, seg_id: str, neighbor: str, wrong_way: bool) -> None:
             seg = self.segments[seg_id]
-            w_cost = seg.distance_km * (1.0 + alpha * seg.risk_score / 100.0)
+            penalty = edge_penalties.get(seg_id, 1.0) if edge_penalties else 1.0
+            w_cost = (seg.distance_km * penalty) * (1.0 + alpha * seg.risk_score / 100.0)
             if wrong_way:
                 w_cost *= WRONG_WAY_PENALTY
             tentative_g = g_score[current] + w_cost
@@ -298,62 +300,51 @@ class RoadNetwork:
     ) -> List[RouteResult]:
         """
         Find up to `num_alternatives` distinct routes using edge-penalization.
-        After finding each route, the segments on that route get a temporary
-        distance penalty so the next search is forced to explore different
-        roads. This is the standard technique used by Google Maps / Waze.
+        Thread-safe: penalties are passed into the search without mutating the
+        shared road network in-memory.
         """
         PENALTY_FACTOR = 3.0  # multiply cost of used segments
         results: List[RouteResult] = []
         seen_paths = set()
-        
-        # Save original distances
-        original_distances = {sid: seg.distance_km for sid, seg in self.segments.items()}
-        
+        penalty_map: Dict[str, float] = {}
+
         alphas_to_try = [
             0.0,                          # fastest
             max(1.0, alpha / 2.0),        # balanced  
             max(alpha, 2.5),              # safest
         ]
-        
-        try:
-            for i in range(num_alternatives):
-                a = alphas_to_try[i] if i < len(alphas_to_try) else alpha
-                route = self.find_route(start_id, goal_id, a, allow_wrong_way)
-                if route is None:
-                    continue
-                
-                path_key = ",".join(route.node_ids)
-                if path_key in seen_paths:
-                    # Same path found — penalize harder and retry with a different alpha
-                    for seg_id in route.segment_ids:
-                        if seg_id in self.segments:
-                            self.segments[seg_id].distance_km *= PENALTY_FACTOR
-                    # Retry with a slightly different alpha
-                    retry_route = self.find_route(start_id, goal_id, a + 0.5, allow_wrong_way)
-                    if retry_route:
-                        retry_key = ",".join(retry_route.node_ids)
-                        if retry_key not in seen_paths:
-                            seen_paths.add(retry_key)
-                            results.append(retry_route)
-                            # Penalize this route's segments too
-                            for seg_id in retry_route.segment_ids:
-                                if seg_id in self.segments:
-                                    self.segments[seg_id].distance_km *= PENALTY_FACTOR
-                    continue
-                
-                seen_paths.add(path_key)
-                results.append(route)
-                
-                # Penalize the segments of this route for the next iteration
+
+        for i in range(num_alternatives):
+            a = alphas_to_try[i] if i < len(alphas_to_try) else alpha
+            route = self.find_route(start_id, goal_id, a, allow_wrong_way, edge_penalties=penalty_map)
+            if route is None:
+                continue
+
+            path_key = ",".join(route.node_ids)
+            if path_key in seen_paths:
+                # Same path found — penalize harder and retry with a slightly higher alpha
                 for seg_id in route.segment_ids:
-                    if seg_id in self.segments:
-                        self.segments[seg_id].distance_km *= PENALTY_FACTOR
-        finally:
-            # ALWAYS restore original distances
-            for sid, dist in original_distances.items():
-                if sid in self.segments:
-                    self.segments[sid].distance_km = dist
-        
+                    penalty_map[seg_id] = penalty_map.get(seg_id, 1.0) * PENALTY_FACTOR
+
+                retry_route = self.find_route(
+                    start_id, goal_id, a + 0.5, allow_wrong_way, edge_penalties=penalty_map
+                )
+                if retry_route:
+                    retry_key = ",".join(retry_route.node_ids)
+                    if retry_key not in seen_paths:
+                        seen_paths.add(retry_key)
+                        results.append(retry_route)
+                        for seg_id in retry_route.segment_ids:
+                            penalty_map[seg_id] = penalty_map.get(seg_id, 1.0) * PENALTY_FACTOR
+                continue
+
+            seen_paths.add(path_key)
+            results.append(route)
+
+            # Penalize the segments of this route for subsequent iterations
+            for seg_id in route.segment_ids:
+                penalty_map[seg_id] = penalty_map.get(seg_id, 1.0) * PENALTY_FACTOR
+
         return results
 
     # -----------------------------------------------------------

@@ -5,7 +5,13 @@
 
 const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
 const HAZARD_THRESHOLD = 70; // mirrors risk_engine.HAZARD_WARNING_THRESHOLD
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const OVERPASS_MIRRORS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
+const OVERPASS_URL = OVERPASS_MIRRORS[0];
+const overpassMemoryCache = new Map(); // Session cache for instant road re-loads
+const roadCanvasRenderer = L.canvas({ padding: 0.5 }); // High-performance canvas renderer for 60 FPS
 const DEFAULT_CENTER = [14.2117, 121.1653]; // Calamba, Laguna, PH
 const DEFAULT_ZOOM = 15;
 const MAX_SEGMENTS_IMPORTED = 6000; // keep imports + rendering snappy
@@ -237,13 +243,43 @@ async function loadRoadsInView({
   els.roadLoadNote.hidden = false;
   els.osmNote.hidden = true;
 
+  const cacheKey = `osm_bbox_${parseFloat(south).toFixed(3)}_${parseFloat(west).toFixed(3)}_${parseFloat(north).toFixed(3)}_${parseFloat(east).toFixed(3)}`;
+  let data = overpassMemoryCache.get(cacheKey);
+  if (!data) {
+    try {
+      const stored = sessionStorage.getItem(cacheKey);
+      if (stored) data = JSON.parse(stored);
+    } catch (e) {}
+  }
+
   try {
-    const resp = await fetch(OVERPASS_URL, {
-      method: "POST",
-      body: "data=" + encodeURIComponent(query),
-    });
-    if (!resp.ok) throw new Error(`Overpass returned ${resp.status}`);
-    const data = await resp.json();
+    if (data) {
+      logEvent("Loaded road network from local cache (instant).");
+    } else {
+      let resp = null;
+      let lastErr = null;
+      for (const endpoint of OVERPASS_MIRRORS) {
+        try {
+          const r = await fetch(endpoint, {
+            method: "POST",
+            body: "data=" + encodeURIComponent(query),
+          });
+          if (r.ok) {
+            resp = r;
+            break;
+          }
+          lastErr = new Error(`Overpass (${new URL(endpoint).host}) returned ${r.status}`);
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      if (!resp) throw lastErr || new Error("Failed to contact Overpass servers");
+      data = await resp.json();
+      overpassMemoryCache.set(cacheKey, data);
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      } catch (quotaErr) {}
+    }
 
     const { nodes, segments } = parseOverpassWays(data.elements || []);
     if (!nodes.length || !segments.length) {
@@ -465,17 +501,26 @@ function renderNetwork(data) {
     let cls = `seg-line seg-line--${band}`;
     if (isHazard) cls += " seg-line--hazard";
 
+    const useCanvasForRoads = segs.length > 1200;
+    const riskColors = { green: "#34D399", yellow: "#FBBF3C", red: "#FB5F5F" };
+
+    const lineOpts = {
+      color: useCanvasForRoads ? riskColors[band] : "#888",
+      weight: 6,
+      opacity: 0.9,
+    };
+    if (useCanvasForRoads) {
+      lineOpts.renderer = roadCanvasRenderer;
+    } else {
+      lineOpts.className = cls;
+    }
+
     const line = L.polyline(
       [
         [a.lat, a.lon],
         [b.lat, b.lon],
       ],
-      {
-        color: "#888",
-        weight: 6,
-        opacity: 0.9,
-        className: cls,
-      },
+      lineOpts,
     );
     const riskWord = { green: "Low", yellow: "Moderate", red: "Critical" }[band];
     const speedNow = Math.round(s.traffic_speed_kmh || 50);
@@ -486,7 +531,7 @@ function renderNetwork(data) {
     line.bindTooltip(tooltipHtml, { sticky: true });
     line.addTo(segmentLayer);
 
-    // FR-1.1 Traffic Overlay (inner line)
+    // FR-1.1 Traffic Overlay (inner line) — rendered via high-performance Canvas
     const speed = s.traffic_speed_kmh || 50;
     let trafficColor = "#44cc44"; // green / free flowing
     if (speed < 20) trafficColor = "#ff4444"; // red / congested
@@ -498,6 +543,7 @@ function renderNetwork(data) {
         [b.lat, b.lon],
       ],
       {
+        renderer: roadCanvasRenderer,
         color: trafficColor,
         weight: 2,
         opacity: 0.9,
@@ -506,7 +552,8 @@ function renderNetwork(data) {
     );
     trafficLine.addTo(segmentLayer);
 
-    if (s.isOneway) {
+    // Only render one-way arrows when zoomed in or when segment count is manageable
+    if (s.isOneway && (segs.length <= 800 || map.getZoom() >= 15)) {
       const midLat = (a.lat + b.lat) / 2;
       const midLon = (a.lon + b.lon) / 2;
       const bearing = getBearing(a.lat, a.lon, b.lat, b.lon);
