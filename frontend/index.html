@@ -3,390 +3,526 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>STORMLINE — Which route is safe right now?</title>
+    <title>STORMLINE — Weather-Aware Route Safety</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
-    />
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <style>
+      /* ============================================================
+         STORMLINE — landing page (self-contained)
+         Same design-token vocabulary as the route console, but
+         packaged in a single file so the overview page has zero
+         external CSS dependencies.
+         ============================================================ */
+      :root {
+        --bg:           #070B14;
+        --bg-grid:      #0C1424;
+        --panel:        #0E1627;
+        --panel-raised: #142037;
+        --border:       #1F2E4D;
+        --border-soft:  #17233B;
+        --text-primary: #EAF0FA;
+        --text-muted:   #93A1BF;
+        --text-dim:     #5A6785;
+        --sweep:        #4FA3FF;
+        --sweep-glow:   rgba(79,163,255,0.28);
+        --risk-green:   #34D399;
+        --risk-yellow:  #FBBF3C;
+        --risk-red:     #FB5F5F;
+        --font-display: 'Space Grotesk', sans-serif;
+        --font-body:    'Inter', sans-serif;
+        --font-mono:    'IBM Plex Mono', monospace;
+        --radius:       16px;
+        --radius-sm:    10px;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html { scroll-behavior: smooth; }
+
+      body {
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        -webkit-font-smoothing: antialiased;
+        background-image:
+          radial-gradient(1100px 550px at 20% -10%, rgba(79,163,255,0.12), transparent 60%),
+          radial-gradient(800px 500px at 90% 0%, rgba(168,85,247,0.07), transparent 60%),
+          linear-gradient(var(--bg-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+        background-size: auto, auto, 34px 34px, 34px 34px;
+        background-attachment: fixed;
+      }
+
+      a { color: var(--sweep); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      /* ---------- scanlines ---------- */
+      .scanlines {
+        position: fixed; inset: 0;
+        pointer-events: none; z-index: 999;
+        background: repeating-linear-gradient(to bottom,
+          rgba(255,255,255,0.010) 0px, rgba(255,255,255,0.010) 1px,
+          transparent 1px, transparent 3px);
+        mix-blend-mode: overlay;
+      }
+
+      /* ---------- topbar ---------- */
+      .topbar {
+        position: sticky; top: 0; z-index: 900;
+        display: flex; align-items: center; justify-content: space-between;
+        height: 64px; padding: 0 32px;
+        background: rgba(10,16,30,0.82);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+      }
+      .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+      .brand-mark {
+        width: 30px; height: 30px; border-radius: 50%; flex: none;
+        background: conic-gradient(from 0deg, var(--sweep), transparent 65%, var(--sweep));
+        box-shadow: 0 0 16px var(--sweep-glow), inset 0 0 0 1px rgba(79,163,255,0.35);
+        animation: spin 6s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .brand-name {
+        font-family: var(--font-display); font-weight: 700;
+        font-size: 18px; letter-spacing: 0.08em;
+      }
+      .brand-sub {
+        font-size: 10.5px; color: var(--text-muted);
+        letter-spacing: 0.06em; text-transform: uppercase;
+      }
+      .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+
+      .topbar-nav { display: flex; gap: 10px; align-items: center; }
+      .topbar-nav a {
+        font-size: 13px; font-weight: 600; color: var(--text-muted);
+        padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px;
+        transition: color .15s, border-color .15s, background .15s;
+        text-decoration: none;
+      }
+      .topbar-nav a:hover { color: var(--text-primary); border-color: var(--sweep); background: rgba(79,163,255,0.08); }
+      .topbar-nav .btn-launch {
+        background: linear-gradient(180deg, #34D399, #1FA571);
+        border-color: #4BE0A6; color: #04130C; font-weight: 700;
+        box-shadow: 0 6px 16px -8px rgba(52,211,153,0.6);
+      }
+      .topbar-nav .btn-launch:hover { background: linear-gradient(180deg, #45DCA5, #26B07B); border-color: #6BEAB9; }
+
+      /* ---------- hero ---------- */
+      .hero {
+        max-width: 900px; margin: 0 auto;
+        text-align: center;
+        padding: 80px 24px 60px;
+      }
+      .hero-eyebrow {
+        display: inline-block;
+        font-family: var(--font-mono); font-size: 11px;
+        letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--sweep);
+        background: rgba(79,163,255,0.1); border: 1px solid rgba(79,163,255,0.25);
+        padding: 4px 12px; border-radius: 999px;
+        margin-bottom: 20px;
+      }
+      .hero h1 {
+        font-family: var(--font-display);
+        font-size: clamp(34px, 5vw, 56px);
+        font-weight: 700; letter-spacing: -0.02em;
+        line-height: 1.15;
+        margin-bottom: 16px;
+      }
+      .hero h1 em {
+        font-style: normal;
+        background: linear-gradient(90deg, var(--sweep), #A78BFA);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .hero p {
+        font-size: 17px; color: var(--text-muted);
+        line-height: 1.65; max-width: 620px; margin: 0 auto 32px;
+      }
+      .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .hero-actions .btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 14px 28px; border-radius: var(--radius-sm);
+        font-weight: 700; font-size: 15px;
+        border: 1px solid; cursor: pointer; transition: all .2s;
+        text-decoration: none;
+      }
+      .btn--go {
+        background: linear-gradient(180deg, #34D399, #1FA571);
+        border-color: #4BE0A6; color: #04130C;
+        box-shadow: 0 10px 24px -10px rgba(52,211,153,0.6);
+      }
+      .btn--go:hover { background: linear-gradient(180deg, #45DCA5, #26B07B); transform: translateY(-1px); }
+      .btn--outline {
+        background: transparent; border-color: var(--border);
+        color: var(--text-primary);
+      }
+      .btn--outline:hover { border-color: var(--sweep); background: rgba(79,163,255,0.06); }
+
+      /* ---------- section scaffolding ---------- */
+      section { padding: 60px 24px; }
+      .section-inner { max-width: 1060px; margin: 0 auto; }
+      .section-label {
+        display: inline-block;
+        font-family: var(--font-mono); font-size: 10.5px;
+        letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--sweep); margin-bottom: 10px;
+      }
+      .section-title {
+        font-family: var(--font-display);
+        font-size: clamp(24px, 3.5vw, 34px);
+        font-weight: 700; margin-bottom: 14px;
+      }
+      .section-sub {
+        font-size: 15px; color: var(--text-muted);
+        line-height: 1.6; max-width: 600px;
+        margin-bottom: 36px;
+      }
+
+      /* ---------- features grid ---------- */
+      .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+      .feature-card {
+        background: linear-gradient(180deg, rgba(20,32,55,0.55), rgba(14,22,39,0.9));
+        border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 26px 24px;
+        box-shadow: 0 18px 40px -24px rgba(0,0,0,0.85);
+        transition: border-color .2s, transform .2s;
+      }
+      .feature-card:hover { border-color: rgba(79,163,255,0.4); transform: translateY(-2px); }
+      .feature-icon {
+        width: 44px; height: 44px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px;
+        border-radius: 12px;
+        background: rgba(79,163,255,0.1); border: 1px solid rgba(79,163,255,0.25);
+        margin-bottom: 16px;
+      }
+      .feature-card h3 {
+        font-family: var(--font-display); font-size: 16px;
+        font-weight: 700; margin-bottom: 8px;
+      }
+      .feature-card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; }
+
+      /* ---------- how it works ---------- */
+      .steps {
+        display: flex; gap: 24px; flex-wrap: wrap;
+        counter-reset: step;
+      }
+      .step {
+        flex: 1 1 200px;
+        position: relative;
+        padding: 26px 22px;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: var(--radius);
+        counter-increment: step;
+      }
+      .step::before {
+        content: counter(step);
+        display: flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px;
+        border-radius: 50%;
+        background: rgba(79,163,255,0.15); border: 1px solid rgba(79,163,255,0.45);
+        font-family: var(--font-mono); font-size: 14px;
+        font-weight: 700; color: var(--sweep);
+        margin-bottom: 14px;
+      }
+      .step h3 {
+        font-family: var(--font-display); font-size: 15px;
+        font-weight: 700; margin-bottom: 6px;
+      }
+      .step p { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+
+      /* ---------- team ---------- */
+      #team { border-top: 1px solid var(--border-soft); }
+      .team-grid {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .member {
+        flex: 0 1 180px;
+        display: flex; flex-direction: column; align-items: center;
+        text-align: center;
+        background: linear-gradient(180deg, rgba(20,32,55,0.55), rgba(14,22,39,0.9));
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 28px 18px 22px;
+        transition: border-color .2s, transform .2s;
+      }
+      .member:hover { border-color: rgba(79,163,255,0.4); transform: translateY(-3px); }
+      .member-photo {
+        width: 100px; height: 100px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid var(--border);
+        margin-bottom: 14px;
+        box-shadow: 0 0 0 4px rgba(79,163,255,0.12);
+        transition: border-color .2s;
+      }
+      .member:hover .member-photo { border-color: var(--sweep); }
+      .member-name {
+        font-family: var(--font-display);
+        font-size: 14px; font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .member-role {
+        font-size: 12px; color: var(--text-muted);
+        font-family: var(--font-mono); letter-spacing: 0.03em;
+      }
+
+      /* ---------- tech stack ---------- */
+      .tech-pills {
+        display: flex; gap: 10px; flex-wrap: wrap;
+        justify-content: center;
+      }
+      .pill {
+        display: flex; align-items: center; gap: 7px;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 16px;
+        font-size: 13px; font-weight: 600; color: var(--text-muted);
+        transition: border-color .15s;
+      }
+      .pill:hover { border-color: var(--sweep); color: var(--text-primary); }
+      .pill-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--sweep); flex: none;
+      }
+
+      /* ---------- footer ---------- */
+      footer {
+        text-align: center;
+        padding: 40px 24px;
+        font-size: 12.5px;
+        color: var(--text-dim);
+        border-top: 1px solid var(--border-soft);
+      }
+      footer a { color: var(--text-muted); }
+
+      /* ---------- responsive ---------- */
+      @media (max-width: 700px) {
+        .topbar { padding: 0 16px; }
+        .topbar-nav a:not(.btn-launch) { display: none; }
+        section { padding: 40px 16px; }
+        .hero { padding: 48px 16px 36px; }
+        .steps { flex-direction: column; }
+      }
+    </style>
   </head>
-  <body class="mode-simple">
+  <body>
     <div class="scanlines" aria-hidden="true"></div>
 
+    <!-- ============================== TOPBAR ============================== -->
     <header class="topbar">
-      <div class="brand">
+      <a class="brand" href="#">
         <span class="brand-mark" aria-hidden="true"></span>
-        <div class="brand-text">
+        <span class="brand-text">
           <span class="brand-name">STORMLINE</span>
-          <span class="brand-sub" id="brandSub"
-            >is it safe to drive right now?</span
-          >
-        </div>
-      </div>
-
-      <div class="topbar-right">
-        <div class="topbar-status" data-advanced>
-          <div class="status-item">
-            <span class="status-label">API link</span>
-            <span class="status-value" id="apiStatus">
-              <span class="dot dot--pending"></span> connecting…
-            </span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Road data</span>
-            <span class="status-value mono" id="networkSource">—</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Next auto-check</span>
-            <span class="status-value mono" id="nextRefresh">—</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Clock</span>
-            <span class="status-value mono" id="clock">—</span>
-          </div>
-        </div>
-
-        <label class="mode-toggle">
-          <span class="mode-toggle-label" id="modeToggleLabel">Simple</span>
-          <input type="checkbox" id="modeSwitch" />
-          <span class="mode-toggle-track"
-            ><span class="mode-toggle-thumb"></span
-          ></span>
-        </label>
-      </div>
+          <span class="brand-sub">Weather-Aware Route Safety</span>
+        </span>
+      </a>
+      <nav class="topbar-nav">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#team">Team</a>
+        <a href="console.html" class="btn-launch">⚡ Launch Console</a>
+      </nav>
     </header>
 
-    <!-- ============================== SIMPLE MODE HERO ============================== -->
-    <section class="hero" data-simple>
-      <div class="hero-card">
-        <h1 class="hero-title">Where are you headed?</h1>
-        <p class="hero-sub">
-          We'll check live weather along the way and tell you the safest route.
-        </p>
-
-        <div class="hero-steps">
-          <div class="hero-step">
-            <span class="hero-step-num">1</span>
-            <div class="hero-step-body">
-              <div class="search-wrap" id="originSearchWrap">
-                <input type="text" id="originSearchInput" class="search-input"
-                       placeholder="Search a starting place…" autocomplete="off" />
-                <div class="search-results" id="originSearchResults" hidden></div>
-              </div>
-              <button id="btnUseLocation" class="btn btn--primary btn--wide">
-                📍 Use my location
-              </button>
-              <span class="field-hint">Or tap a starting point on the map</span>
-            </div>
-          </div>
-          <div class="hero-step">
-            <span class="hero-step-num">2</span>
-            <div class="hero-step-body">
-              <div class="search-wrap" id="destSearchWrap">
-                <input type="text" id="destSearchInput" class="search-input"
-                       placeholder="Search your destination…" autocomplete="off" />
-                <div class="search-results" id="destSearchResults" hidden></div>
-              </div>
-              <div class="hero-pin-status" id="originStatus">
-                Waiting for origin…
-              </div>
-              <div class="hero-pin-status" id="destStatus">
-                Then tap your destination on the map
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <details class="hero-manual">
-          <summary>Pick from a list instead</summary>
-          <label class="field">
-            <span class="field-label">Origin</span>
-            <select id="startNode" class="select"></select>
-          </label>
-          <label class="field">
-            <span class="field-label">Destination</span>
-            <select id="goalNode" class="select"></select>
-          </label>
-        </details>
-
-        <label style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; cursor: pointer; color: var(--text-muted); font-size: 0.85rem;">
-          <input type="checkbox" id="ignoreOneway" />
-          Ignore one-way rules (walking / biking)
-        </label>
-
-        <button id="btnFindRoute" class="btn btn--cta btn--wide" disabled>
-          Find the safest route
-        </button>
-        <button id="btnStartOver" class="btn btn--reset btn--wide" hidden>
-          🔄 Plan a different trip
-        </button>
-        <p class="hero-loading-note" id="roadLoadNote" hidden>
-          Getting real road &amp; weather data for this area…
-        </p>
-      </div>
-
-      <!-- plain-language verdict, filled in after a route is found -->
-      <div class="verdict-card" id="verdictCard" hidden>
-        <div class="verdict-icon" id="verdictIcon">✅</div>
-        <div class="verdict-body">
-          <div class="verdict-headline" id="verdictHeadline">—</div>
-          <div class="verdict-detail" id="verdictDetail">—</div>
-          <div class="verdict-meta">
-            <span><strong id="verdictEta">—</strong> min drive</span>
-            <span><strong id="verdictDist">—</strong> km</span>
-          </div>
-        </div>
-        <details class="verdict-tech" style="flex-basis: 100%;">
-          <summary>▶ See all route options</summary>
-          <div id="verdictTechBody"></div>
-        </details>
+    <!-- ============================== HERO ============================== -->
+    <section class="hero">
+      <span class="hero-eyebrow">Capstone Project · 2026</span>
+      <h1>Drive smarter with <em>live weather intelligence</em></h1>
+      <p>
+        STORMLINE checks real-time precipitation, visibility, and wind along
+        every road segment on your route — then recommends the safest path so
+        you can avoid flooding, poor visibility, and hazardous conditions.
+      </p>
+      <div class="hero-actions">
+        <a href="console.html" class="btn btn--go">⚡ Open the Route Console</a>
+        <a href="#features" class="btn btn--outline">↓ Learn more</a>
       </div>
     </section>
 
-    <main class="layout">
-      <!-- LEFT: route + road-data controls (advanced) -->
-      <section
-        class="panel panel--controls"
-        aria-label="Route controls"
-        data-advanced
-      >
-        <h2 class="panel-title">Live road data</h2>
-        <div class="field-hint" style="margin-bottom: 10px">
-          Pan/zoom the map to a small area, then pull real roads from
-          OpenStreetMap for that view.
-        </div>
-        <div class="button-row">
-          <button id="btnLoadRoads" class="btn btn--primary">
-            Load real roads in view
-          </button>
-        </div>
-        <p class="fallback-note" id="osmNote" hidden></p>
-
-        <div class="divider"></div>
-
-        <h2 class="panel-title">Plan route</h2>
-        <div class="field-hint" style="margin-bottom: 10px">
-          Click two points on the map (origin, then destination) — or search
-          by name below.
-        </div>
-
-        <div class="field">
-          <span class="field-label">Search a place</span>
-          <div class="search-wrap" id="advSearchWrap">
-            <input type="text" id="advSearchInput" class="search-input"
-                   placeholder="Type a place name…" autocomplete="off" />
-            <div class="search-results" id="advSearchResults" hidden></div>
-          </div>
-          <span class="field-hint">Results pan the map and set next origin/destination</span>
-          <button id="btnAdvUseLocation" class="btn" style="margin-top: 8px; width: 100%;">
-            📍 Use my location
-          </button>
-        </div>
-
-        <label class="field">
-          <span class="field-label">
-            Risk aversion
-            <span class="mono field-value" id="alphaValue">1.5</span>
-          </span>
-          <input
-            type="range"
-            id="alphaSlider"
-            class="slider"
-            min="0"
-            max="4"
-            step="0.1"
-            value="1.5"
-          />
-          <span class="field-hint"
-            >0 = shortest path only &nbsp;·&nbsp; 4 = avoid risk at any
-            cost</span
-          >
-        </label>
-
-        <div class="button-row">
-          <button id="btnCompare" class="btn btn--primary">
-            Compare routes
-          </button>
-          <button id="btnReroute" class="btn" disabled>Check reroute</button>
-        </div>
-
-        <label style="display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; color: var(--text-muted); font-size: 0.85rem;">
-          <input type="checkbox" id="advIgnoreOneway" />
-          Ignore one-way rules (walking / biking)
-        </label>
-
-        <div class="divider"></div>
-
-        <h2 class="panel-title">Weather feed</h2>
-        <div class="field-hint" style="margin-bottom: 10px">
-          Live conditions from Open-Meteo, sampled at each road node. Refreshes
-          automatically every
-          <span class="mono" id="pollIntervalLabel">300</span>s.
-        </div>
-        <label class="autopoll-row">
-          <input type="checkbox" id="autoPollToggle" checked />
-          <span>Auto-refresh weather</span>
-          <span class="mono autopoll-countdown" id="autoPollCountdown">—</span>
-        </label>
-        <div class="button-row" style="margin-top: 10px">
-          <button id="btnRefresh" class="btn">Poll weather now</button>
-          <button id="btnOutage" class="btn btn--outage">Simulate outage</button>
-          <button id="btnStorm" class="btn" style="background: #e74c3c; color: white;">Simulate storm</button>
-        </div>
-        <p class="fallback-note" id="fallbackNote" hidden>
-          ⚠ Live feed unavailable — routing on historical fallback (NFR-2.1)
+    <!-- ============================== FEATURES ============================== -->
+    <section id="features">
+      <div class="section-inner">
+        <span class="section-label">Key capabilities</span>
+        <h2 class="section-title">What STORMLINE does</h2>
+        <p class="section-sub">
+          A risk-averse routing engine that fuses live weather feeds with road
+          network data to keep you safe.
         </p>
 
-        <div class="divider"></div>
-
-        <h2 class="panel-title">Legend</h2>
-        <ul class="legend">
-          <li>
-            <span class="swatch swatch--green"></span> Low risk
-            <span class="mono legend-range">R &lt; 30</span>
-          </li>
-          <li>
-            <span class="swatch swatch--yellow"></span> Moderate
-            <span class="mono legend-range">30–70</span>
-          </li>
-          <li>
-            <span class="swatch swatch--red"></span> Critical
-            <span class="mono legend-range">R ≥ 70</span>
-          </li>
-        </ul>
-      </section>
-
-      <!-- CENTER: real map (always visible, simple or advanced) -->
-      <section class="panel panel--radar" aria-label="Road network risk map">
-        <div class="radar-frame">
-          <div id="map" class="leaflet-map"></div>
-          <div class="radar-caption" data-advanced>
-            SEGMENT RISK — LIVE · click map to set origin/destination
+        <div class="features">
+          <div class="feature-card">
+            <div class="feature-icon">🌧️</div>
+            <h3>Live Weather Integration</h3>
+            <p>
+              Pulls real-time precipitation, visibility, wind speed, and
+              temperature from the Open-Meteo API every 5 minutes and maps
+              readings to nearby road segments via geofencing.
+            </p>
           </div>
-          <div class="map-legend">
-            <div class="map-legend-row">
-              <span class="swatch swatch--green"></span> Low risk
-              <span class="mono legend-range">R &lt; 30</span>
-            </div>
-            <div class="map-legend-row">
-              <span class="swatch swatch--yellow"></span> Moderate
-              <span class="mono legend-range">30–70</span>
-            </div>
-            <div class="map-legend-row">
-              <span class="swatch swatch--red"></span> Critical
-              <span class="mono legend-range">R &ge; 70</span>
-            </div>
+          <div class="feature-card">
+            <div class="feature-icon">🛣️</div>
+            <h3>Risk-Aware Routing</h3>
+            <p>
+              Uses a modified A* algorithm with weather-weighted edge costs.
+              The risk-aversion slider lets you trade off travel time against
+              safety — from “shortest path” to “avoid risk at any cost.”
+            </p>
           </div>
-        </div>
-      </section>
-
-      <!-- RIGHT: stations + event log (advanced) -->
-      <section
-        class="panel panel--side"
-        aria-label="Stations and activity"
-        data-advanced
-      >
-        <h2 class="panel-title">Stations (Open-Meteo)</h2>
-        <div id="stationList" class="station-list">
-          <p class="field-hint">Loading…</p>
-        </div>
-
-        <div class="divider"></div>
-
-        <h2 class="panel-title">Activity log</h2>
-        <div id="eventLog" class="event-log" aria-live="polite"></div>
-      </section>
-
-      <!-- BOTTOM: technical route result cards (advanced) -->
-      <section
-        class="panel panel--results"
-        aria-label="Route results"
-        id="resultsPanel"
-        data-advanced
-        hidden
-      >
-        <div class="result-card" id="fastCard">
-          <div class="result-head">
-            <span class="result-tag result-tag--fast">Fastest</span>
-            <span class="result-band mono" id="fastBand">—</span>
+          <div class="feature-card">
+            <div class="feature-icon">📊</div>
+            <h3>3 Route Alternatives</h3>
+            <p>
+              Generates Fastest, Balanced, and Safest routes using an
+              edge-penalization technique, then ranks them with plain-language
+              explanations backed by real weather data.
+            </p>
           </div>
-          <div class="result-path mono" id="fastPath">—</div>
-          <div class="result-stats">
-            <div>
-              <span class="stat-label">Distance</span
-              ><span class="stat-value mono" id="fastDist">—</span>
-            </div>
-            <div>
-              <span class="stat-label">ETA</span
-              ><span class="stat-value mono" id="fastEta">—</span>
-            </div>
-            <div>
-              <span class="stat-label">Risk</span
-              ><span class="stat-value mono" id="fastRisk">—</span>
-            </div>
+          <div class="feature-card">
+            <div class="feature-icon">🟢</div>
+            <h3>Color-Coded Hazard Map</h3>
+            <p>
+              Every road segment is color-coded green / yellow / red based on
+              its computed weather risk score. Hazardous segments pulse to
+              draw your attention.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">⚠️</div>
+            <h3>Hazard Threshold Alerts</h3>
+            <p>
+              When a segment’s risk score exceeds the critical threshold, the
+              system triggers a hazard warning and can automatically suggest
+              a reroute around the danger zone.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🛡️</div>
+            <h3>Historical Fallback</h3>
+            <p>
+              If the live weather API goes down, STORMLINE falls back to
+              historical flood and drainage data so routing never goes blind.
+              The outage is surfaced clearly in the UI.
+            </p>
           </div>
         </div>
+      </div>
+    </section>
 
-        <div class="result-card" id="balancedCard">
-          <div class="result-head">
-            <span class="result-tag" style="background:#f39c12;color:white;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;">Balanced</span>
-            <span class="result-band mono" id="balancedBand">—</span>
+    <!-- ============================== HOW IT WORKS ============================== -->
+    <section id="how">
+      <div class="section-inner">
+        <span class="section-label">Workflow</span>
+        <h2 class="section-title">How it works</h2>
+        <p class="section-sub">
+          From loading the map to getting your verdict — in four steps.
+        </p>
+
+        <div class="steps">
+          <div class="step">
+            <h3>Pick your area</h3>
+            <p>
+              Pan the map to your area of interest. STORMLINE pulls real road
+              geometry from OpenStreetMap via Overpass.
+            </p>
           </div>
-          <div class="result-path mono" id="balancedPath">—</div>
-          <div class="result-stats">
-            <div>
-              <span class="stat-label">Distance</span
-              ><span class="stat-value mono" id="balancedDist">—</span>
-            </div>
-            <div>
-              <span class="stat-label">ETA</span
-              ><span class="stat-value mono" id="balancedEta">—</span>
-            </div>
-            <div>
-              <span class="stat-label">Risk</span
-              ><span class="stat-value mono" id="balancedRisk">—</span>
-            </div>
+          <div class="step">
+            <h3>Set origin &amp; destination</h3>
+            <p>
+              Tap two points on the map or search by place name. The system
+              loads roads and weather data for the corridor in between.
+            </p>
+          </div>
+          <div class="step">
+            <h3>Weather is evaluated</h3>
+            <p>
+              Open-Meteo readings are geofenced to each road segment.
+              A weighted risk formula calculates each segment’s score
+              (rain, visibility, drainage, flood history).
+            </p>
+          </div>
+          <div class="step">
+            <h3>Get your verdict</h3>
+            <p>
+              STORMLINE shows three alternative routes — Fastest, Balanced,
+              and Safest — ranked with clear weather-backed reasoning and
+              drawn on the map in distinct colors.
+            </p>
           </div>
         </div>
+      </div>
+    </section>
 
-        <div class="result-card" id="safeCard">
-          <div class="result-head">
-            <span class="result-tag result-tag--safe">Safest</span>
-            <span class="result-band mono" id="safeBand">—</span>
+    <!-- ============================== TEAM ============================== -->
+    <section id="team">
+      <div class="section-inner" style="text-align:center;">
+        <span class="section-label">The team</span>
+        <h2 class="section-title" style="margin-left:auto;margin-right:auto;">Meet the developers</h2>
+        <p class="section-sub" style="margin-left:auto;margin-right:auto;">
+          Built as a capstone project by five computer science students.
+        </p>
+
+        <div class="team-grid">
+          <div class="member">
+            <img class="member-photo" src="assets/team/benedic-sarmiento.jpg" alt="Benedic Sarmiento" />
+            <div class="member-name">Benedic Sarmiento</div>
+            <div class="member-role">Developer</div>
           </div>
-          <div class="result-path mono" id="safePath">—</div>
-          <div class="result-stats">
-            <div>
-              <span class="stat-label">Distance</span
-              ><span class="stat-value mono" id="safeDist">—</span>
-            </div>
-            <div>
-              <span class="stat-label">ETA</span
-              ><span class="stat-value mono" id="safeEta">—</span>
-            </div>
-            <div>
-              <span class="stat-label">Risk</span
-              ><span class="stat-value mono" id="safeRisk">—</span>
-            </div>
+          <div class="member">
+            <img class="member-photo" src="assets/team/bryan-cuellar.jpg" alt="Bryan Cuellar" />
+            <div class="member-name">Bryan Cuellar</div>
+            <div class="member-role">Developer</div>
+          </div>
+          <div class="member">
+            <img class="member-photo" src="assets/team/john-wayne-landong.jpg" alt="John Wayne Landong" />
+            <div class="member-name">John Wayne Landong</div>
+            <div class="member-role">Developer</div>
+          </div>
+          <div class="member">
+            <img class="member-photo" src="assets/team/raymark-oronan.jpg" alt="Raymark Oronan" />
+            <div class="member-name">Raymark Oronan</div>
+            <div class="member-role">Developer</div>
+          </div>
+          <div class="member">
+            <img class="member-photo" src="assets/team/terrence-john-manlapaz.jpg" alt="Terrence John Manlapaz" />
+            <div class="member-name">Terrence John Manlapaz</div>
+            <div class="member-role">Developer</div>
           </div>
         </div>
+      </div>
+    </section>
 
-        <div class="result-card result-card--tradeoff">
-          <div class="result-head">
-            <span class="result-tag result-tag--tradeoff">Trade-off & Rankings</span>
-          </div>
-          <p id="tradeoffText" class="tradeoff-text" style="margin-bottom:8px;">—</p>
-          <div id="rankingsText" class="tradeoff-text" style="font-size: 0.9em; opacity: 0.9;"></div>
+    <!-- ============================== TECH STACK ============================== -->
+    <section>
+      <div class="section-inner" style="text-align:center;">
+        <span class="section-label">Built with</span>
+        <h2 class="section-title" style="margin-left:auto;margin-right:auto;">Technology stack</h2>
+        <div class="tech-pills">
+          <span class="pill"><span class="pill-dot"></span> Python</span>
+          <span class="pill"><span class="pill-dot"></span> FastAPI</span>
+          <span class="pill"><span class="pill-dot"></span> Open-Meteo API</span>
+          <span class="pill"><span class="pill-dot"></span> OpenStreetMap / Overpass</span>
+          <span class="pill"><span class="pill-dot"></span> Leaflet.js</span>
+          <span class="pill"><span class="pill-dot"></span> A* Pathfinding</span>
+          <span class="pill"><span class="pill-dot"></span> Vanilla JS</span>
         </div>
-      </section>
-    </main>
+      </div>
+    </section>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <script src="app.js?v=9"></script>
+    <!-- ============================== FOOTER ============================== -->
+    <footer>
+      <p>&copy; 2026 STORMLINE · Capstone Project ·
+        <a href="console.html">Launch Console</a>
+      </p>
+    </footer>
   </body>
 </html>

@@ -113,6 +113,16 @@ const pinLayer = L.layerGroup().addTo(map);
 
 map.on("click", (e) => onMapClick(e.latlng));
 
+// The map container changes size when switching Simple/Advanced (the
+// layout is different in each) or when the window resizes. Leaflet only
+// measures its container once, so re-measure whenever it changes —
+// otherwise tiles render in just part of the map.
+if ("ResizeObserver" in window) {
+  new ResizeObserver(() => map.invalidateSize()).observe(
+    document.getElementById("map"),
+  );
+}
+
 // -------------------------------------------------------------- utils
 
 async function api(path, options) {
@@ -468,9 +478,13 @@ function renderNetwork(data) {
         className: cls,
       },
     );
-    let tooltipText = `${s.id} — R=${s.risk_score} (${band}${isHazard ? ", HAZARD" : ""}) | Traffic: ${s.traffic_speed_kmh} km/h`;
-    if (s.isOneway) tooltipText += " [ONE-WAY]";
-    line.bindTooltip(tooltipText);
+    const riskWord = { green: "Low", yellow: "Moderate", red: "Critical" }[band];
+    const speedNow = Math.round(s.traffic_speed_kmh || 50);
+    const tooltipHtml =
+      `<div class="tip-main">${riskWord} weather risk${isHazard ? " — hazard" : ""}${s.isOneway ? " · one-way" : ""}</div>` +
+      `<div>Traffic moving at about ${speedNow} km/h</div>` +
+      `<div class="tip-tech">${s.id} · R=${s.risk_score}</div>`;
+    line.bindTooltip(tooltipHtml, { sticky: true });
     line.addTo(segmentLayer);
 
     // FR-1.1 Traffic Overlay (inner line)
@@ -1100,9 +1114,9 @@ function renderVerdict(data) {
   }
   
   els.verdictTechBody.innerHTML = 
-    routeCard('🔵', 'Fastest Route', fastest, '#2C6FD1') +
-    routeCard('🟠', 'Balanced Route', balanced, '#f39c12') +
-    routeCard('🟣', 'Safest Route', safest, '#a855f7') +
+    routeCard('🔵', 'Fastest Route', fastest, '#4FA3FF') +
+    routeCard('🟠', 'Balanced Route', balanced, '#F59E0B') +
+    routeCard('🟣', 'Safest Route', safest, '#A855F7') +
     (data.rankings ? `
       <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-soft);">
         <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">📊 Route Rankings</div>
