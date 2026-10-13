@@ -25,9 +25,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
+
+# Ensure sibling backend modules can always be imported regardless of working directory
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
