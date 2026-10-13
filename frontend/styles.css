@@ -722,11 +722,11 @@ body.mode-simple .panel--radar {
   background: var(--panel) !important;
 }
 
-/* Dark, instrument-panel-toned basemap: CARTO Dark Matter tiles run
-   through a filter so they sit in the same navy/blue palette as the rest
-   of the console instead of a stock light/gray map. */
+/* Clean, dark, instrument-panel basemap using standard OSM tiles
+   inverted and color-shifted to match the deep navy palette seamlessly
+   without requiring any external API key or showing watermarks. */
 .leaflet-tile-pane {
-  filter: brightness(0.9) contrast(1.05) saturate(1.15) hue-rotate(-4deg);
+  filter: brightness(0.85) invert(100%) contrast(120%) hue-rotate(200deg) saturate(35%);
 }
 
 .leaflet-container {
